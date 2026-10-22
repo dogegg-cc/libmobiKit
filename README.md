@@ -4,10 +4,10 @@
 
 ## 接入
 
-需要 Swift 6 / Xcode 16 或更新版本。在 Xcode 添加包地址 `https://github.com/dogegg-cc/libmobiKit.git`，选择精确版本 `0.1.2`，并链接及嵌入 `MobiKit` 动态产品。Swift Package 可这样依赖：
+需要 Swift 6 / Xcode 16 或更新版本。在 Xcode 添加包地址 `https://github.com/dogegg-cc/libmobiKit.git`，选择精确版本 `0.1.3`，并链接及嵌入 `MobiKit` 动态产品。Swift Package 可这样依赖：
 
 ```swift
-.package(url: "https://github.com/dogegg-cc/libmobiKit.git", exact: "0.1.2")
+.package(url: "https://github.com/dogegg-cc/libmobiKit.git", exact: "0.1.3")
 // Target dependencies:
 .product(name: "MobiKit", package: "libmobiKit")
 ```
@@ -32,6 +32,7 @@ swift build
 
 - 上游 [libmobi 0.12](https://github.com/bfabiszewski/libmobi/tree/906274205c11944b628da1c553b255acb1af7c55)，固定提交 `906274205c11944b628da1c553b255acb1af7c55`。
 - `Sources/CMobi/` 中的上游解析器文件保持原样，保留版权头。新增 `FileBoxMobi.c` 和 `include/FileBoxMobi.h`，提供输入预算、加密拒绝、安全提取和取消桥接；`Sources/MobiKit/` 为 Swift 封装。
+- 固定版式漫画缺少全书 `original-resolution` 时，保留现有页面 viewport，或从纯单图页明确的图片宽高生成逐页 viewport；支持 `div/p/img` 包装，原图保持不变。缺少可靠尺寸的复杂固定版式仍拒绝。
 - 旧 MOBI 的 `mbp:pagebreak` 转换为标准分页，写盘前校验 XML 结构及命名空间。`MobiMarkup.cacheVersion` 用于派生缓存失效；`version` 继续表示原始阅读身份版本。
 - SwiftSoup 精确固定为 `2.13.9`，沿用 FileBox 的现有版本，使用 MIT 许可。`Package.resolved` 记录其提交。
 - 独立库不链接 Readium，也不包含应用私有代码和书籍。应用集成与真实样本回归见 [FileBox MOBI 文档](https://github.com/dogegg-cc/filebox/tree/main/docs/mobi-reader)。

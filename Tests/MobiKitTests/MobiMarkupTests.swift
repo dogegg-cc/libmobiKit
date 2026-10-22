@@ -47,4 +47,32 @@ struct MobiMarkupTests {
             try MobiMarkup.normalize(directory: root, isCancelled: { false })
         }
     }
+
+    @Test("缺少全书尺寸的旧固定漫画逐页使用图片尺寸", arguments: ["", "<meta name='viewport' content='width=800, height=1200'/>"])
+    func fixedImageDimensions(viewport: String) throws {
+        let root = try workspace(body: "<div><p><img src='resource00000.jpg' width='758' height='1024'/></p></div>")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let opf = root.appendingPathComponent("content.opf")
+        let package = try String(contentsOf: opf, encoding: .utf8).replacingOccurrences(of: "<metadata/>", with: "<metadata><meta name='fixed-layout' content='true'/></metadata>")
+        try package.write(to: opf, atomically: true, encoding: .utf8)
+        try Data([0]).write(to: root.appendingPathComponent("resource00000.jpg"))
+        if !viewport.isEmpty {
+            let url = root.appendingPathComponent("part00000.html")
+            try String(contentsOf: url, encoding: .utf8).replacingOccurrences(of: "</head>", with: viewport + "</head>").write(to: url, atomically: true, encoding: .utf8)
+        }
+        try MobiMarkup.normalize(directory: root, isCancelled: { false })
+        let html = try String(contentsOf: root.appendingPathComponent("part00000.html"), encoding: .utf8)
+        #expect(html.contains(viewport.isEmpty ? "width=758, height=1024" : "width=800, height=1200"))
+        #expect(html.contains("object-fit:contain!important"))
+        #expect(try String(contentsOf: opf, encoding: .utf8).contains("pre-paginated"))
+    }
+
+    @Test("固定版式缺少可靠尺寸时仍拒绝，不凭混合正文猜测画布", arguments: ["<p>正文<img src='resource00000.jpg' width='758' height='1024'/></p>", "<div><p><img src='resource00000.jpg'/></p></div>", "<div><img src='resource00000.jpg' width='100001' height='1024'/></div>"])
+    func missingFixedDimensions(body: String) throws {
+        let root = try workspace(body: body)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let opf = root.appendingPathComponent("content.opf")
+        try String(contentsOf: opf, encoding: .utf8).replacingOccurrences(of: "<metadata/>", with: "<metadata><meta name='fixed-layout' content='true'/></metadata>").write(to: opf, atomically: true, encoding: .utf8)
+        #expect(throws: MobiDecodeError.invalid) { try MobiMarkup.normalize(directory: root, isCancelled: { false }) }
+    }
 }

@@ -8,7 +8,7 @@ import SwiftSoup
 public enum MobiMarkup {
     public static let version = "v1"
     // 标记修复只更新派生缓存版本，原始书籍的阅读指纹继续沿用 version，保留已有进度和书签。
-    public static let cacheVersion = "v2"
+    public static let cacheVersion = "v3"
 
     public static func normalize(directory: URL, isCancelled: @Sendable () -> Bool) throws {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -30,7 +30,7 @@ public enum MobiMarkup {
         let fixed = try metas.contains { try $0.attr("name") == "fixed-layout" && $0.attr("content") == "true" }
         let resolution = try metas.first(where: { try $0.attr("name") == "original-resolution" })?.attr("content") ?? ""
         let dimensions = resolution.split(separator: "x").compactMap { Int($0) }
-        if fixed, dimensions.count != 2 || dimensions.contains(where: { !(1 ... 100_000).contains($0) }) { throw MobiDecodeError.invalid }
+        if fixed, !resolution.isEmpty, dimensions.count != 2 || dimensions.contains(where: { !(1 ... 100_000).contains($0) }) { throw MobiDecodeError.invalid }
         try root.attr("version", "3.0").attr("prefix", "rendition: http://www.idpf.org/vocab/rendition/#")
         try metadata.appendElement("meta").attr("property", "rendition:layout").text(fixed ? "pre-paginated" : "reflowable")
         try metadata.appendElement("meta").attr("property", "dcterms:modified").text("2000-01-01T00:00:00Z")
@@ -54,17 +54,28 @@ public enum MobiMarkup {
                     .attr("style", style + ";page-break-before:always;break-before:page")
             }
             if fixed, let head = try page.getElementsByTag("head").first() {
+                let body = try page.getElementsByTag("body").first()
+                let image = try body?.getElementsByTag("img").first()
+                let simpleImage = try body.map { body in
+                    try body.getElementsByTag("img").size() == 1 && body.text().isEmpty &&
+                        body.getAllElements().allSatisfy { ["body", "div", "p", "img"].contains($0.tagName()) }
+                } ?? false
                 if try head.select("meta[name=viewport]").isEmpty() {
-                    try head.appendElement("meta").attr("name", "viewport").attr("content", "width=\(dimensions[0]), height=\(dimensions[1])")
+                    // ChainLP 等旧漫画没有全书 original-resolution，但逐页图片提供了完整尺寸。
+                    // 只对纯单图页采用明确的图片尺寸，不猜测复杂固定版式的画布，也不改变原图。
+                    var pageSize = dimensions
+                    if pageSize.isEmpty, simpleImage, let image,
+                       let width = try Int(image.attr("width")), let height = try Int(image.attr("height")),
+                       (1 ... 100_000).contains(width), (1 ... 100_000).contains(height)
+                    { pageSize = [width, height] }
+                    guard pageSize.count == 2 else { throw MobiDecodeError.invalid }
+                    try head.appendElement("meta").attr("name", "viewport").attr("content", "width=\(pageSize[0]), height=\(pageSize[1])")
                 }
-                if let body = try page.getElementsByTag("body").first(),
-                   try body.getElementsByTag("img").size() == 1, try body.text().isEmpty,
-                   try body.getAllElements().allSatisfy({ ["body", "div", "img"].contains($0.tagName()) })
-                {
+                if simpleImage {
                     // 纯单图漫画按完整图片显示；不覆盖有文本、链接或复杂布局的固定页面。
                     try head.appendElement("style").attr("type", "text/css").text("""
                     html,body{margin:0!important;padding:0!important;width:100%;height:100%;overflow:hidden}
-                    body div{position:static!important;width:100%!important;height:100%!important}
+                    body div,body p{position:static!important;width:100%!important;height:100%!important;margin:0!important;padding:0!important}
                     body img{position:absolute!important;inset:0!important;display:block!important;width:100%!important;height:100%!important;margin:0!important;padding:0!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;object-position:center!important}
                     """)
                 }
