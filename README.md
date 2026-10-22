@@ -4,10 +4,10 @@
 
 ## 接入
 
-需要 Swift 6 / Xcode 16 或更新版本。在 Xcode 添加包地址 `https://github.com/dogegg-cc/libmobiKit.git`，选择精确版本 `0.1.0`，并链接及嵌入 `MobiKit` 动态产品。Swift Package 可这样依赖：
+需要 Swift 6 / Xcode 16 或更新版本。在 Xcode 添加包地址 `https://github.com/dogegg-cc/libmobiKit.git`，选择精确版本 `0.1.1`，并链接及嵌入 `MobiKit` 动态产品。Swift Package 可这样依赖：
 
 ```swift
-.package(url: "https://github.com/dogegg-cc/libmobiKit.git", exact: "0.1.0")
+.package(url: "https://github.com/dogegg-cc/libmobiKit.git", exact: "0.1.1")
 // Target dependencies:
 .product(name: "MobiKit", package: "libmobiKit")
 ```
@@ -41,4 +41,4 @@ swift build
 
 `Sources/MobiKit/Notices/GPL-3.0.txt` 是 LGPL v3 引用的配套正文。LGPL v3 第 4(b) 条要求分发组合作品时同时提供 GNU GPL 和 LGPL 文本，因此随包保留它；这不表示项目另行采用独立 GPL 许可，也不表示使用本库的整个 App 改为 GPL。
 
-动态库的 `Notices` 资源包含完整 LGPL、配套 GPL 和源码说明，应用可通过 `MobiDecoder.licenseNotice()` 展示。动态链接与附带文本本身不等于完成所有分发义务；上游未提供额外的 App Store / DRM 例外。
+动态库的 `Notices` 资源包含完整 LGPL、配套 GPL 和源码说明，应用可通过 `MobiDecoder.licenseNotice()` 展示。动态链接与附带文本本身不等于完成所有分发义务。
