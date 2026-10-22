@@ -1,5 +1,5 @@
-libmobiKit 0.1.1 — MobiKit dynamic Swift package
-Project source: https://github.com/dogegg-cc/libmobiKit/tree/0.1.1
+libmobiKit 0.1.2 — MobiKit dynamic Swift package
+Project source: https://github.com/dogegg-cc/libmobiKit/tree/0.1.2
 License: LGPL-3.0-or-later.
 
 libmobi 0.12

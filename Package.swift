@@ -12,6 +12,7 @@ let package = Package(
             .define("USE_XMLWRITER"), .define("HAVE_STRDUP"), .define("HAVE_UNISTD_H"),
             .define("MOBI_INLINE", to: "inline"), .headerSearchPath(".")
         ], linkerSettings: [.linkedLibrary("z")]),
-        .target(name: "MobiKit", dependencies: ["CMobi", "SwiftSoup"], resources: [.copy("Notices")])
+        .target(name: "MobiKit", dependencies: ["CMobi", "SwiftSoup"], resources: [.copy("Notices")]),
+        .testTarget(name: "MobiKitTests", dependencies: ["MobiKit"])
     ]
 )

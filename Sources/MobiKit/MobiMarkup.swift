@@ -7,6 +7,8 @@ import SwiftSoup
 /// 只整理解码器写入的本书文件；不下载外部资源，不把书内路径交给文件写入 API。
 public enum MobiMarkup {
     public static let version = "v1"
+    // 标记修复只更新派生缓存版本，原始书籍的阅读指纹继续沿用 version，保留已有进度和书签。
+    public static let cacheVersion = "v2"
 
     public static func normalize(directory: URL, isCancelled: @Sendable () -> Bool) throws {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -44,6 +46,13 @@ public enum MobiMarkup {
                 .attr("xmlns:epub", "http://www.idpf.org/2007/ops")
             // 旧书的脚本/插件不是阅读所需内容；原始链接仍交给阅读器的外链确认流程。
             try page.select("script, iframe, object, embed, base").remove()
+            // 旧 MOBI 的私有分页标签没有 XML 命名空间，原样输出会让 WebKit 将错误页混入正文。
+            // 改为标准块级分页，保留原 ID、样式和子节点，避免损坏章节锚点或吞掉后续正文。
+            for pageBreak in try page.getElementsByTag("mbp:pagebreak") {
+                let style = try pageBreak.attr("style")
+                try pageBreak.tagName("div").addClass("filebox-mobi-pagebreak")
+                    .attr("style", style + ";page-break-before:always;break-before:page")
+            }
             if fixed, let head = try page.getElementsByTag("head").first() {
                 if try head.select("meta[name=viewport]").isEmpty() {
                     try head.appendElement("meta").attr("name", "viewport").attr("content", "width=\(dimensions[0]), height=\(dimensions[1])")
@@ -130,7 +139,33 @@ public enum MobiMarkup {
 
     private static func save(_ document: Document, to url: URL) throws {
         document.outputSettings().syntax(syntax: .xml).escapeMode(.xhtml).prettyPrint(pretty: false)
-        try Data(document.outerHtml().utf8).write(to: url, options: [.atomic, .completeFileProtection])
+        // Foundation 在部分平台会容忍未声明前缀，即使启用命名空间处理也可能不返回错误。
+        // 显式检查标签/属性的作用域声明，避免 WebKit 严格解析时把错误文本混进正文。
+        for element in try document.getAllElements() {
+            let names = [element.tagName()] + (element.getAttributes()?.asList().map { $0.getKey() } ?? [])
+            for name in names where name.contains(":") && !name.hasPrefix("xmlns:") && !name.hasPrefix("xml:") {
+                let parts = name.split(separator: ":", omittingEmptySubsequences: false)
+                guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { throw MobiDecodeError.invalid }
+                let declaration = "xmlns:" + parts[0]
+                var owner: Element? = element
+                var bound = false
+                while let candidate = owner {
+                    if candidate.hasAttr(declaration) {
+                        bound = try !candidate.attr(declaration).isEmpty
+                        break
+                    }
+                    owner = candidate.parent()
+                }
+                guard bound else { throw MobiDecodeError.invalid }
+            }
+        }
+        let data = try Data(document.outerHtml().utf8)
+        let parser = XMLParser(data: data)
+        parser.shouldProcessNamespaces = true
+        parser.shouldResolveExternalEntities = false
+        // 结构校验也在写盘前完成，失败的资源不能进入转换缓存。
+        guard parser.parse(), parser.parserError == nil else { throw MobiDecodeError.invalid }
+        try data.write(to: url, options: [.atomic, .completeFileProtection])
     }
 
     private static func localName(_ href: String, names: Set<String>) throws -> String {
