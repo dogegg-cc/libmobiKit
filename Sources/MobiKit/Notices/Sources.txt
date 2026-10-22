@@ -1,0 +1,16 @@
+libmobiKit 0.1.0 — MobiKit dynamic Swift package
+Project source: https://github.com/dogegg-cc/libmobiKit/tree/0.1.0
+License: LGPL-3.0-or-later.
+
+libmobi 0.12
+Copyright (c) Bartek Fabiszewski and contributors.
+Upstream source: https://github.com/bfabiszewski/libmobi/tree/906274205c11944b628da1c553b255acb1af7c55
+License: LGPL-3.0-or-later; no additional App Store exception is claimed.
+
+The corresponding unmodified parsing sources are included in Sources/CMobi.
+FileBox additions, also LGPL-3.0-or-later: FileBoxMobi.c and include/FileBoxMobi.h for bounded extraction and cancellation; Sources/MobiKit for Swift interoperability and markup normalization.
+The package builds as a separate dynamic library, using system zlib and libmobi's internal XML writer. Encryption is disabled.
+Dependency: SwiftSoup 2.13.9, MIT; https://github.com/scinfu/SwiftSoup/tree/2.13.9
+Rebuild from the project root: swift build
+For iOS, add the remote package's MobiKit product, link and embed the dynamic framework, and build the chosen ARM64 destination.
+The full LGPL v3 and companion GPL v3 texts follow. The GPL text accompanies LGPL v3 under its incorporated terms and section 4(b); it is not a separate project-wide GPL license declaration.
