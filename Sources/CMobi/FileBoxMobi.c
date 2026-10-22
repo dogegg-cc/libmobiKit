@@ -1,10 +1,15 @@
 #include "include/FileBoxMobi.h"
 #include "mobi.h"
+#include "read.h"
+#include "util.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+
+// 固定上游版本提供的书头解析入口；只复用格式、编码解析，不调用会装载全书的 mobi_load_file。
+MOBI_RET mobi_parse_record0(MOBIData *m, size_t seqnumber);
 
 static uint16_t be16(const unsigned char *p) { return ((uint16_t)p[0] << 8) | p[1]; }
 static uint32_t be32(const unsigned char *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
@@ -83,6 +88,111 @@ static int preflight(FILE *file) {
 done:
     free(offsets);
     rewind(file);
+    return result;
+}
+
+static int load_metadata_record(MOBIData *mobi, FILE *file, size_t index, size_t limit, FBMobiCancelled cancelled, void *context) {
+    MOBIPdbRecord *record = mobi_get_record_by_seqnumber(mobi, index);
+    struct stat info;
+    if (!record || fstat(fileno(file), &info)) return FB_MOBI_INVALID;
+    uint64_t end = record->next ? record->next->offset : (uint64_t)info.st_size;
+    if (end <= record->offset) return FB_MOBI_INVALID;
+    if (end - record->offset > limit) return FB_MOBI_LIMIT;
+    if (record->data) return FB_MOBI_OK;
+    record->size = (size_t)(end - record->offset);
+    record->data = malloc(record->size);
+    if (!record->data) return FB_MOBI_LIMIT;
+    if (fseek(file, record->offset, SEEK_SET)) return FB_MOBI_IO;
+    // 封面也可能较大，分块检查取消；不会顺带读出其它图片或压缩正文。
+    for (size_t offset = 0; offset < record->size;) {
+        if (cancelled && cancelled(context)) return FB_MOBI_CANCELLED;
+        size_t length = record->size - offset;
+        if (length > 64 * 1024) length = 64 * 1024;
+        if (fread(record->data + offset, 1, length, file) != length) return FB_MOBI_IO;
+        offset += length;
+    }
+    return FB_MOBI_OK;
+}
+
+void fb_mobi_free_metadata(FBMobiMetadata *metadata) {
+    if (!metadata) return;
+    free(metadata->title);
+    for (size_t i = 0; i < metadata->author_count; i++) free(metadata->authors[i]);
+    free(metadata->authors);
+    free(metadata->cover);
+    memset(metadata, 0, sizeof(*metadata));
+}
+
+int fb_mobi_metadata(const char *source, FBMobiMetadata *metadata, FBMobiCancelled cancelled, void *context) {
+    if (!metadata) return FB_MOBI_INVALID;
+    memset(metadata, 0, sizeof(*metadata));
+    if (cancelled && cancelled(context)) return FB_MOBI_CANCELLED;
+    int fd = open(source, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) return FB_MOBI_IO;
+    FILE *file = fdopen(fd, "rb");
+    if (!file) { close(fd); return FB_MOBI_IO; }
+    int result = preflight(file);
+    MOBIData *mobi = NULL;
+    if (result != FB_MOBI_OK) goto done;
+    mobi = mobi_init();
+    if (!mobi) { result = FB_MOBI_LIMIT; goto done; }
+    // 索引节点不含负载。先保留全书相同的结构、加密与预算检查，再按记录偏移定点读取。
+    if (mobi_load_pdbheader(mobi, file) != MOBI_SUCCESS || mobi->ph->rec_count < 2 || mobi->ph->rec_count > 10000 || mobi_load_reclist(mobi, file) != MOBI_SUCCESS) { result = FB_MOBI_INVALID; goto done; }
+    result = load_metadata_record(mobi, file, 0, 1024 * 1024, cancelled, context);
+    if (result != FB_MOBI_OK) goto done;
+    if (mobi_parse_record0(mobi, 0) != MOBI_SUCCESS || !mobi->mh) { result = FB_MOBI_INVALID; goto done; }
+    MOBIExthHeader *kf8 = mobi_get_exthrecord_by_tag(mobi, EXTH_KF8BOUNDARY);
+    // 上游查询函数要求 BOUNDARY 负载已装入内存；预检已校验该标记，直接复用经验证的记录号。
+    size_t boundary = kf8 && kf8->size == 4 && be32(kf8->data) != UINT32_MAX ? be32(kf8->data) - 1 : MOBI_NOTSET;
+    if (boundary != MOBI_NOTSET) {
+        result = load_metadata_record(mobi, file, boundary + 1, 1024 * 1024, cancelled, context);
+        if (result != FB_MOBI_OK) goto done;
+        mobi->kf8_boundary_offset = (uint32_t)boundary;
+        mobi->next = mobi_init();
+        if (!mobi->next) { result = FB_MOBI_LIMIT; goto done; }
+        mobi->next->ph = mobi->ph;
+        mobi->next->rec = mobi->rec;
+        mobi->next->internals = mobi->internals;
+        mobi->next->next = mobi;
+        if (mobi_parse_record0(mobi->next, boundary + 1) != MOBI_SUCCESS || !mobi->next->mh || mobi_swap_mobidata(mobi) != MOBI_SUCCESS) { result = FB_MOBI_INVALID; goto done; }
+    }
+    if (mobi_is_dictionary(mobi)) { result = FB_MOBI_UNSUPPORTED; goto done; }
+    // Print Replica 的标识只需正文首记录的四字节，不为检测类型解压或加载正文。
+    if (mobi->rh && mobi->rh->compression_type == MOBI_COMPRESSION_NONE) {
+        MOBIPdbRecord *first = mobi_get_record_by_seqnumber(mobi, mobi_get_kf8offset(mobi) + 1);
+        unsigned char magic[4];
+        if (first && fseek(file, first->offset, SEEK_SET) == 0 && fread(magic, 1, 4, file) == 4 && !memcmp(magic, REPLICA_MAGIC, 4)) { result = FB_MOBI_UNSUPPORTED; goto done; }
+    }
+    metadata->title = mobi_meta_get_title(mobi);
+    size_t authors = 0;
+    for (MOBIExthHeader *item = mobi->eh; item; item = item->next) if (item->tag == EXTH_AUTHOR) authors++;
+    if (authors) {
+        metadata->authors = calloc(authors, sizeof(char *));
+        if (!metadata->authors) { result = FB_MOBI_LIMIT; goto done; }
+        for (MOBIExthHeader *item = mobi->eh; item; item = item->next) if (item->tag == EXTH_AUTHOR) {
+            char *author = mobi_decode_exthstring(mobi, item->data, item->size);
+            if (author) metadata->authors[metadata->author_count++] = author;
+        }
+    }
+    MOBIExthHeader *cover = mobi_get_exthrecord_by_tag(mobi, EXTH_COVEROFFSET);
+    size_t first = mobi_get_first_resource_record(mobi);
+    if (cover && cover->size == 4 && first < mobi->ph->rec_count) {
+        uint32_t offset = be32(cover->data);
+        // 混合文件的资源起点取 KF7 头，封面偏移取当前 KF8 元数据，与完整转换保持一致。
+        if (offset < mobi->ph->rec_count - first) {
+            result = load_metadata_record(mobi, file, first + offset, 32 * 1024 * 1024, cancelled, context);
+            if (result != FB_MOBI_OK) goto done;
+            MOBIPdbRecord *record = mobi_get_record_by_seqnumber(mobi, first + offset);
+            metadata->cover = record->data;
+            metadata->cover_size = record->size;
+            record->data = NULL; // 所有权交给 metadata；mobi_free 仍负责其余已读取的书头。
+        }
+    }
+    result = cancelled && cancelled(context) ? FB_MOBI_CANCELLED : FB_MOBI_OK;
+done:
+    if (mobi) mobi_free(mobi);
+    fclose(file);
+    if (result != FB_MOBI_OK) fb_mobi_free_metadata(metadata);
     return result;
 }
 

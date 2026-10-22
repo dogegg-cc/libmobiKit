@@ -4,10 +4,10 @@
 
 ## 接入
 
-需要 Swift 6 / Xcode 16 或更新版本。在 Xcode 添加包地址 `https://github.com/dogegg-cc/libmobiKit.git`，选择精确版本 `0.1.3`，并链接及嵌入 `MobiKit` 动态产品。Swift Package 可这样依赖：
+需要 Swift 6 / Xcode 16 或更新版本。在 Xcode 添加包地址 `https://github.com/dogegg-cc/libmobiKit.git`，选择精确版本 `0.1.4`，并链接及嵌入 `MobiKit` 动态产品。Swift Package 可这样依赖：
 
 ```swift
-.package(url: "https://github.com/dogegg-cc/libmobiKit.git", exact: "0.1.3")
+.package(url: "https://github.com/dogegg-cc/libmobiKit.git", exact: "0.1.4")
 // Target dependencies:
 .product(name: "MobiKit", package: "libmobiKit")
 ```
@@ -17,10 +17,14 @@ import MobiKit
 
 // 在后台执行器调用；输出目录应为新建的私有空目录。
 try MobiDecoder.extract(source: inputURL, directory: outputDirectory, isCancelled: { false })
+// 列表封面无需提取正文或转换整本书；调用方负责缩略图降采样与缓存。
+let metadata = try MobiDecoder.metadata(source: inputURL, isCancelled: { false })
 let notice = try MobiDecoder.licenseNotice()
 ```
 
-`MobiDecoder` 同步提取 HTML、OPF、NCX 和图片，调用方负责调度、取消与临时目录清理。`MobiMarkup` 用 SwiftSoup 清洗旧 HTML、补齐 EPUB 3 导航和固定版式信息，保留原图。它不提供完整 EPUB ZIP、阅读器 UI 或 DRM 解密。
+`MobiDecoder.metadata` 仅读取记录索引、书头和明确声明的封面记录，返回标题、作者数组和原始封面；混合文件沿用 KF8 元数据与 KF7 共享资源起点。缺少声明时返回空封面，由调用方选择兼容回退。不会解压正文、读取其它图片或创建文件，仍检查结构、加密、资源预算和取消。
+
+`MobiDecoder.extract` 同步提取 HTML、OPF、NCX 和图片，调用方负责调度、取消与临时目录清理。`MobiMarkup` 用 SwiftSoup 清洗旧 HTML、补齐 EPUB 3 导航和固定版式信息，保留原图。它不提供完整 EPUB ZIP、阅读器 UI 或 DRM 解密。
 
 支持未加密的传统 MOBI、KF8 与混合文件，不支持词典与 Print Replica。资源预算：输入 128 MiB、最多 10,000 个记录、文本 64 MiB、单资源 32 MiB、总资源 512 MiB。使用系统 zlib 和 libmobi 内置 XML writer；禁用加密实现。
 

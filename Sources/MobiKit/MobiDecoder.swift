@@ -5,6 +5,13 @@ public enum MobiDecodeError: Error, Sendable {
     case invalid, encrypted, oversized, cancelled, io, unsupported
 }
 
+public struct MobiMetadata: Sendable {
+    public let title: String?
+    public let authors: [String]
+    /// 原始声明封面；缺少声明时为 nil，调用方可沿用正文封面识别回退。
+    public let cover: Data?
+}
+
 public enum MobiDecoder {
     private final class CancellationContext {
         let check: @Sendable () -> Bool
@@ -21,6 +28,29 @@ public enum MobiDecoder {
                 }, Unmanaged.passUnretained(context).toOpaque())
             }
         }
+        try check(result)
+    }
+
+    public static func metadata(source: URL, isCancelled: @escaping @Sendable () -> Bool) throws -> MobiMetadata {
+        let context = CancellationContext(isCancelled)
+        var metadata = FBMobiMetadata()
+        defer { fb_mobi_free_metadata(&metadata) }
+        let result = source.withUnsafeFileSystemRepresentation { path in
+            fb_mobi_metadata(path, &metadata, { pointer in
+                guard let pointer else { return 1 }
+                return Unmanaged<CancellationContext>.fromOpaque(pointer).takeUnretainedValue().check() ? 1 : 0
+            }, Unmanaged.passUnretained(context).toOpaque())
+        }
+        try check(result)
+        let title = metadata.title.map { String(cString: $0) }
+        let authors = (0 ..< Int(metadata.author_count)).compactMap { index in
+            metadata.authors?[index].map { String(cString: $0) }
+        }
+        let cover = metadata.cover.map { Data(bytes: $0, count: metadata.cover_size) }
+        return MobiMetadata(title: title, authors: authors, cover: cover)
+    }
+
+    private static func check(_ result: Int32) throws {
         switch Int(result) {
         case FB_MOBI_OK: return
         case FB_MOBI_ENCRYPTED: throw MobiDecodeError.encrypted
